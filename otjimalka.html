@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>IMPERIAL MONITOR v2.0</title>
+    <style>
+        body { background: #050505; color: #00ff00; font-family: 'Segoe UI', monospace; display: flex; flex-direction: column; align-items: center; min-height: 100vh; margin: 0; }
+        .container { border: 2px solid #333; background: #111; padding: 30px; border-radius: 10px; box-shadow: 0 0 20px rgba(0,255,0,0.2); width: 450px; margin-top: 50px; }
+        h1 { color: #ff0000; text-align: center; text-transform: uppercase; letter-spacing: 3px; margin-bottom: 30px; }
+        .data-row { display: flex; justify-content: space-between; font-size: 20px; padding: 10px 0; border-bottom: 1px solid #222; }
+        .label { color: #888; }
+        .value { color: #fff; font-weight: bold; text-shadow: 0 0 5px #fff; }
+        .controls { margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        input { background: #000; border: 1px solid #00ff00; color: #00ff00; padding: 8px; text-align: center; border-radius: 5px; }
+        button { background: #ff0000; color: white; border: none; padding: 15px; font-weight: bold; cursor: pointer; border-radius: 5px; grid-column: span 2; margin-top: 10px; }
+        button:hover { background: #cc0000; box-shadow: 0 0 10px #ff0000; }
+        #connectBtn { background: #0088ff; margin-bottom: 20px; }
+        #status { text-align: center; font-size: 14px; margin-top: 10px; color: #ffaa00; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>IMPERIAL SYSTEM</h1>
+    
+    <button id="connectBtn">ПОДКЛЮЧИТЬ USB-КАБЕЛЬ</button>
+    <div id="status">Статус: Ожидание устройства...</div>
+
+    <div class="data-row"><span class="label">СТАТУС:</span> <span class="value" id="st">ОЖИДАНИЕ</span></div>
+    <div class="data-row"><span class="label">ПОДХОД:</span> <span class="value" id="set">0</span></div>
+    <div class="data-row"><span class="label">ОТЖАЛСЯ:</span> <span class="value" id="reps">0</span></div>
+    <div class="data-row"><span class="label">ОТДЫХ:</span> <span class="value" id="timer">--</span></div>
+    <div class="data-row"><span class="label">ДИСТАНЦИЯ:</span> <span class="value" id="dist">0</span> см</div>
+
+    <div class="controls">
+        <input type="number" id="target" value="10" title="Цель">
+        <input type="number" id="rest" value="30" title="Отдых">
+        <input type="number" id="drop" value="18" title="Спуск">
+        <input type="number" id="sets" value="3" title="Подходы">
+        <button id="startBtn">ЗАПУСТИТЬ ПРОГРАММУ</button>
+    </div>
+</div>
+
+<script>
+    let port, reader, writer;
+
+    // ПРОВЕРКА ПОДДЕРЖКИ USB
+    if (!("serial" in navigator)) {
+        document.getElementById('status').innerText = "ОШИБКА: Браузер не поддерживает USB! Используй Chrome.";
+        document.getElementById('connectBtn').style.display = 'none';
+    }
+
+    document.getElementById('connectBtn').onclick = async () => {
+        try {
+            port = await navigator.serial.requestPort();
+            await port.open({ baudRate: 115200 });
+            document.getElementById('status').innerText = "СИСТЕМА ГОТОВА";
+            document.getElementById('connectBtn').style.background = "#00ff00";
+            readLoop();
+        } catch (e) {
+            document.getElementById('status').innerText = "Ошибка подключения";
+        }
+    };
+
+    document.getElementById('startBtn').onclick = async () => {
+        if (!port) return alert("Сначала подключи USB!");
+        const data = [
+            document.getElementById('target').value, 7, 
+            document.getElementById('drop').value, 5, 4, 
+            document.getElementById('rest').value, 
+            document.getElementById('sets').value
+        ].join(',') + '\n';
+        
+        const encoder = new TextEncoder();
+        writer = port.writable.getWriter();
+        await writer.write(encoder.encode(data));
+        writer.releaseLock();
+    };
+
+    async function readLoop() {
+        const decoder = new TextDecoder();
+        while (port.readable) {
+            reader = port.readable.getReader();
+            try {
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    parseData(decoder.decode(value));
+                }
+            } catch (e) { console.error(e); } finally { reader.releaseLock(); }
+        }
+    }
+
+    function parseData(data) {
+        const d = data.match(/D:(\d+)/); if (d) document.getElementById('dist').innerText = d[1];
+        const w = data.match(/W:(\d+)/); if (w) document.getElementById('reps').innerText = w[1];
+        const s = data.match(/SET:(\d+)/); if (s) document.getElementById('set').innerText = s[1];
+        const st = data.match(/ST:(\w+)/); if (st) document.getElementById('st').innerText = st[1];
+        const rt = data.match(/REST_TIME:(\d+)/); 
+        if (rt) document.getElementById('timer').innerText = rt[1] + "с";
+        else if (data.includes("WORK")) document.getElementById('timer').innerText = "GO!";
+    }
+</script>
+</body>
+</html>

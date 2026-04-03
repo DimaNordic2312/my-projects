@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Dima Energy Live</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <style>
+        body { background: #000; color: #0f0; font-family: 'Courier New', monospace; margin: 0; }
+        .header { padding: 20px; background: #111; border-bottom: 1px solid #0f0; display: flex; justify-content: space-between; align-items: center; }
+        #val { font-size: 70px; text-shadow: 0 0 20px #0f0; }
+        .btn { background: #0f0; color: #000; border: none; padding: 15px 30px; cursor: pointer; font-weight: bold; font-size: 18px; }
+        .container { height: 75vh; width: 98vw; margin: auto; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <button class="btn" onclick="start()">CONNECT</button>
+    <div id="val">0 W</div>
+    <div style="font-size:14px; color:#444">Double Click: Reset View | Drag: Scroll</div>
+</div>
+
+<div class="container">
+    <canvas id="chart"></canvas>
+</div>
+
+<script>
+let chart;
+let buffer = "";
+let isPaused = false;
+
+async function start() {
+    const port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 9600 });
+    const reader = port.readable.getReader();
+    initChart();
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += new TextDecoder().decode(value);
+        if (buffer.includes('\n')) {
+            let lines = buffer.split('\n');
+            let w = parseFloat(lines[lines.length - 2]);
+            buffer = lines[lines.length - 1];
+            if (!isNaN(w)) update(w);
+        }
+    }
+}
+
+function initChart() {
+    chart = new Chart(document.getElementById('chart'), {
+        type: 'line',
+        data: { labels: [], datasets: [{ data: [], borderColor: '#0f0', borderWidth: 2, pointRadius: 0, fill: false }] },
+        options: {
+            responsive: true, maintainAspectRatio: false, animation: false,
+            scales: {
+                x: { display: false },
+                y: { grid: { color: '#111' }, ticks: { color: '#0f0' }, beginAtZero: true }
+            },
+            plugins: {
+                legend: { display: false },
+                zoom: {
+                    pan: { enabled: true, mode: 'x', onPanStart: () => isPaused = true },
+                    zoom: { wheel: { enabled: true }, mode: 'x' }
+                }
+            }
+        }
+    });
+}
+
+function update(w) {
+    document.getElementById('val').innerText = Math.round(w) + " W";
+    chart.data.labels.push("");
+    chart.data.datasets[0].data.push(w);
+    if (!isPaused) {
+        const len = chart.data.labels.length;
+        if (len > 100) {
+            chart.options.scales.x.min = len - 100;
+            chart.options.scales.x.max = len - 1;
+        }
+    }
+    chart.update('none');
+}
+
+document.ondblclick = () => { isPaused = false; chart.resetZoom(); };
+</script>
+</body>
+</html>
