@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Dima Power Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <style>
+        body { background: #1a1a1a; color: #00ff00; font-family: 'Segoe UI', sans-serif; text-align: center; }
+        .container { width: 90%; max-width: 900px; margin: 20px auto; background: #2d2d2d; padding: 20px; border-radius: 15px; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        button { background: #00ff00; color: #000; border: none; padding: 10px 25px; font-size: 18px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #00cc00; }
+        #val { font-size: 64px; margin: 10px 0; }
+        .hint { color: #888; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <h1>ENERGY MONITOR PRO</h1>
+    <button onclick="connectSerial()">CONNECT ARDUINO</button>
+    <div id="val">0.0 W</div>
+    <p class="hint">Управление: Ctrl + Колесо (Зум) | Зажать левую кнопку мыши (Скролл)</p>
+
+    <div class="container">
+        <canvas id="myChart" height="400"></canvas>
+    </div>
+
+    <script>
+        let chart;
+        let buffer = "";
+
+        async function connectSerial() {
+            try {
+                const port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 9600 });
+                const reader = port.readable.getReader();
+                
+                initChart();
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    buffer += new TextDecoder().decode(value);
+                    
+                    if (buffer.includes('\n')) {
+                        let lines = buffer.split('\n');
+                        let lastValidData = lines[lines.length - 2];
+                        buffer = lines[lines.length - 1];
+
+                        let watts = parseFloat(lastValidData);
+                        if (!isNaN(watts)) {
+                            updateUI(watts);
+                        }
+                    }
+                }
+            } catch (e) {
+                alert("Ошибка: " + e.message);
+            }
+        }
+
+        function initChart() {
+            const ctx = document.getElementById('myChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Мощность (W)',
+                        data: [],
+                        borderColor: '#00ff00',
+                        backgroundColor: 'rgba(0, 255, 0, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        zoom: {
+                            pan: { enabled: true, mode: 'x', threshold: 5 },
+                            zoom: {
+                                wheel: { enabled: true, modifierKey: 'ctrl' },
+                                mode: 'x'
+                            }
+                        },
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: { grid: { color: '#444' }, ticks: { color: '#888' } },
+                        y: { grid: { color: '#444' }, ticks: { color: '#888' }, beginAtZero: true, suggestedMax: 500 }
+                    }
+                }
+            });
+        }
+
+        function updateUI(val) {
+            document.getElementById('val').innerText = val.toFixed(1) + " W";
+            const now = new Date().toLocaleTimeString();
+            
+            chart.data.labels.push(now);
+            chart.data.datasets[0].data.push(val);
+
+            // Ограничиваем количество точек до 100, чтобы не тормозило
+            if (chart.data.labels.length > 100) {
+                chart.data.labels.shift();
+                chart.data.datasets[0].data.shift();
+            }
+            chart.update('none'); // Быстрое обновление без анимации
+        }
+    </script>
+</body>
+</html>

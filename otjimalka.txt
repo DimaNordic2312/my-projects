@@ -1,0 +1,235 @@
+/*
+ * PROJECT: ARDUINO-COMPUTER "PUSH-UP MASTER"
+ * Logic: Auto-sets, Auto-rest, Full Imperial March
+ */
+
+// --- ТАБЛИЦА ЧАСТОТ (НОТЫ) ---
+#define NOTE_B0  31
+#define NOTE_C1  33
+#define NOTE_CS1 35
+#define NOTE_D1  37
+#define NOTE_DS1 39
+#define NOTE_E1  41
+#define NOTE_F1  44
+#define NOTE_FS1 46
+#define NOTE_G1  49
+#define NOTE_GS1 52
+#define NOTE_A1  55
+#define NOTE_AS1 58
+#define NOTE_B1  62
+#define NOTE_C2  65
+#define NOTE_CS2 69
+#define NOTE_D2  73
+#define NOTE_DS2 78
+#define NOTE_E2  82
+#define NOTE_F2  87
+#define NOTE_FS2 93
+#define NOTE_G2  98
+#define NOTE_GS2 104
+#define NOTE_A2  110
+#define NOTE_AS2 117
+#define NOTE_B2  123
+#define NOTE_C3  131
+#define NOTE_CS3 139
+#define NOTE_D3  147
+#define NOTE_DS3 156
+#define NOTE_E3  165
+#define NOTE_F3  175
+#define NOTE_FS3 185
+#define NOTE_G3  196
+#define NOTE_GS3 208
+#define NOTE_A3  220
+#define NOTE_AS3 233
+#define NOTE_B3  247
+#define NOTE_C4  262
+#define NOTE_CS4 277
+#define NOTE_D4  294
+#define NOTE_DS4 311
+#define NOTE_E4  330
+#define NOTE_F4  349
+#define NOTE_FS4 370
+#define NOTE_G4  392
+#define NOTE_GS4 415
+#define NOTE_A4  440
+#define NOTE_AS4 466
+#define NOTE_B4  494
+#define NOTE_C5  523
+#define NOTE_CS5 554
+#define NOTE_D5  587
+#define NOTE_DS5 622
+#define NOTE_E5  659
+#define NOTE_F5  698
+#define NOTE_FS5 740
+#define NOTE_G5  784
+#define NOTE_GS5 831
+#define NOTE_A5  880
+#define NOTE_AS5 932
+#define NOTE_B5  988
+#define REST      0
+
+// --- ПИНЫ И ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ---
+const int TRIG = 9, ECHO = 11, BUZ = 5; 
+
+float dFloor = 0, dBack = 0, tLow = 0, tHigh = 0;
+int curRep = 0, targetTotal = 10, curSet = 0, totalSets = 3; 
+int restTime = 30;
+
+bool active = false, isDown = false, calibrated = false, searchingBack = false;
+bool isResting = false; 
+
+unsigned long lastSend = 0, lastMove = 0, phaseTimer = 0, restTimer = 0;
+int lastSecondsLeft = -1;
+int penalty = 7, dropDist = 18, upTol = 5, downTol = 4;
+int lastD = 212;
+int backCounter = 0; long backSum = 0;
+
+// --- МЕЛОДИЯ: ИМПЕРСКИЙ МАРШ (ПРАВИЛЬНАЯ) ---
+int melody[] = {
+  NOTE_A4,4, NOTE_A4,4, NOTE_A4,4, NOTE_F4,-8, NOTE_C5,16,
+  NOTE_A4,4, NOTE_F4,-8, NOTE_C5,16, NOTE_A4,2,
+  NOTE_E5,4, NOTE_E5,4, NOTE_E5,4, NOTE_F5,-8, NOTE_C5,16,
+  NOTE_GS4,4, NOTE_F4,-8, NOTE_C5,16, NOTE_A4,2,
+  NOTE_A5,4, NOTE_A4,-8, NOTE_A4,16, NOTE_A5,4, NOTE_GS5,-8, NOTE_G5,16,
+  NOTE_DS5,16, NOTE_D5,16, NOTE_DS5,8, REST,8, NOTE_A4,8, NOTE_DS5,4, NOTE_D5,-8, NOTE_CS5,16,
+  NOTE_C5,16, NOTE_B4,16, NOTE_C5,16, REST,8, NOTE_F4,8, NOTE_GS4,4, NOTE_F4,-8, NOTE_A4,-16,
+  NOTE_C5,4, NOTE_A4,-8, NOTE_C5,16, NOTE_E5,2,
+  NOTE_A5,4, NOTE_A4,-8, NOTE_A4,16, NOTE_A5,4, NOTE_GS5,-8, NOTE_G5,16,
+  NOTE_DS5,16, NOTE_D5,16, NOTE_DS5,8, REST,8, NOTE_A4,8, NOTE_DS5,4, NOTE_D5,-8, NOTE_CS5,16,
+  NOTE_C5,16, NOTE_B4,16, NOTE_C5,16, REST,8, NOTE_F4,8, NOTE_GS4,4, NOTE_F4,-8, NOTE_A4,-16,
+  NOTE_A4,4, NOTE_F4,-8, NOTE_C5,16, NOTE_A4,2
+};
+
+void playFullImperialMarch() {
+  int tempo = 108; 
+  int notesCount = sizeof(melody) / sizeof(melody[0]) / 2;
+  int wholenote = (60000 * 4) / tempo;
+  for (int thisNote = 0; thisNote < notesCount * 2; thisNote = thisNote + 2) {
+    int divider = melody[thisNote + 1];
+    int noteDuration = (divider > 0) ? (wholenote / divider) : (wholenote / abs(divider) * 1.5);
+    tone(BUZ, melody[thisNote], noteDuration * 0.8);
+    delay(noteDuration);
+    noTone(BUZ);
+  }
+}
+
+int readD() {
+  digitalWrite(TRIG, LOW); delayMicroseconds(2);
+  digitalWrite(TRIG, HIGH); delayMicroseconds(10); digitalWrite(TRIG, LOW);
+  long dur = pulseIn(ECHO, HIGH, 25000); 
+  if (dur == 0) return lastD;
+  int current = dur * 0.034 / 2;
+  if (current < 2 || current > 400) return lastD; 
+  return lastD = current;
+}
+
+void calibrateFloor() {
+  tone(BUZ, 1000, 200);
+  long startSum = 0; int count = 0;
+  while(count < 15) {
+    int val = readD();
+    if(val > 5) { startSum += val; count++; }
+    delay(40);
+  }
+  dFloor = startSum / 15;
+  tone(BUZ, 1500, 400); 
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(TRIG, OUTPUT); pinMode(ECHO, INPUT); pinMode(BUZ, OUTPUT);
+  delay(500);
+  calibrateFloor();
+}
+
+void loop() {
+  // --- 1. ПРИЕМ КОМАНД ---
+  if (Serial.available() > 0) {
+    String s = Serial.readStringUntil('\n'); s.trim();
+    if (s == "RESET") { 
+      active = false; isResting = false; calibrated = false; 
+      tone(BUZ, 300, 600); calibrateFloor(); 
+    }
+    else if (s.indexOf(',') > 0) {
+      int p[7]; int idx = 0;
+      char* str = strdup(s.c_str()); char* part = strtok(str, ",");
+      while(part != NULL && idx < 7) { p[idx++] = atoi(part); part = strtok(NULL, ","); }
+      free(str);
+      targetTotal = p[0]; penalty = p[1]; dropDist = p[2]; upTol = p[3]; downTol = p[4];
+      restTime = (idx > 5) ? p[5] : 30; totalSets = (idx > 6) ? p[6] : 3;
+
+      if (calibrated) {
+        tLow = dBack + dropDist; tHigh = dBack + upTol;
+        active = true; isResting = false; curRep = 0; curSet = 1; lastMove = millis();
+        tone(BUZ, 1500, 400);
+      } else { searchingBack = true; Serial.println("STATE:SEARCHING_BACK"); }
+    }
+  }
+
+  int d = readD();
+
+  // --- 2. ЛОГИКА ОТДЫХА ---
+  if (isResting) {
+    int secondsPassed = (millis() - restTimer) / 1000;
+    int secondsLeft = restTime - secondsPassed;
+    if (secondsLeft != lastSecondsLeft) {
+      Serial.print("REST_TIME:"); Serial.println(secondsLeft);
+      if (secondsLeft <= 5 && secondsLeft > 0) tone(BUZ, 800, 150);
+      lastSecondsLeft = secondsLeft;
+    }
+    if (secondsLeft <= 0) {
+      isResting = false; active = true; curRep = 0; lastMove = millis();
+      tone(BUZ, 1800, 800); Serial.println("STATE:SET_START");
+    }
+  }
+
+  // --- 3. ПОИСК СПИНЫ ---
+  if (searchingBack && !calibrated && d < (dFloor - 10)) {
+    backSum += d; backCounter++;
+    if (backCounter >= 8) {
+      dBack = backSum / 8; calibrated = true; searchingBack = false;
+      tLow = dBack + dropDist; tHigh = dBack + upTol;
+      active = true; curRep = 0; curSet = 1; lastMove = millis();
+      tone(BUZ, 1500, 600); Serial.println("STATE:BACK_DETECTED");
+    }
+  }
+
+  // --- 4. ОТЖИМАНИЯ ---
+  if (active && !isResting && calibrated) {
+    if (!isDown && d >= (tLow - downTol)) {
+      if (phaseTimer == 0) phaseTimer = millis();
+      if (millis() - phaseTimer > 200) { 
+        isDown = true; phaseTimer = 0; lastMove = millis(); 
+        tone(BUZ, 500, 80); 
+      }
+    } 
+    else if (isDown && d <= (tHigh + upTol)) {
+      if (phaseTimer == 0) phaseTimer = millis();
+      if (millis() - phaseTimer > 200) { 
+        curRep++; isDown = false; phaseTimer = 0; lastMove = millis(); 
+        tone(BUZ, 1600, 120); 
+        if (curRep >= targetTotal) { 
+          active = false;
+          if (curSet < totalSets) {
+            curSet++; isResting = true; restTimer = millis();
+            Serial.println("STATE:RESTING"); tone(BUZ, 1000, 500);
+          } else {
+            Serial.println("STATE:ALL_COMPLETE");
+            playFullImperialMarch(); 
+          }
+        }
+      }
+    }
+    if ((millis() - lastMove) > (penalty * 1000)) { 
+      if (curRep > 0) curRep--; 
+      tone(BUZ, 150, 600); lastMove = millis(); 
+    }
+  }
+
+  // --- 5. ОТПРАВКА ДАННЫХ ---
+  if (millis() - lastSend > 200) {
+    Serial.print("D:"); Serial.print(d); Serial.print(";W:"); Serial.print(curRep);
+    Serial.print(";SET:"); Serial.print(curSet); Serial.print(";ST:");
+    Serial.print(isResting ? "REST" : (active ? "WORK" : "IDLE")); Serial.println(";");
+    lastSend = millis();
+  }
+}

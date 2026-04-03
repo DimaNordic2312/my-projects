@@ -1,0 +1,24 @@
+# Скрипт авто-синхронизации для Димы
+$Path = "$HOME\Desktop"
+$Files = @("otjimalka.html.html", "отжималка код.txt", "wattmeter.html", "wattmeter.txt")
+
+cd $Path
+
+Write-Host "Авто-дежурство запущено. Проверка каждые 15 минут..." -ForegroundColor Cyan
+
+while($true) {
+    # Проверяем, изменилось ли что-то в этих файлах
+    $Status = git status --short $Files
+    
+    if ($Status) {
+        Write-Host "Обнаружены изменения! Отправляю на GitHub..." -ForegroundColor Yellow
+        git add $Files
+        git commit -m "Авто-обновление: $(Get-Date -Format 'HH:mm')"
+        git push origin main
+        Write-Host "Готово. Жду 15 минут." -ForegroundColor Green
+    } else {
+        Write-Host "$(Get-Date -Format 'HH:mm') - Изменений нет." -ForegroundColor Gray
+    }
+    
+    Start-Sleep -Seconds 900 # 15 минут в секундах
+}
