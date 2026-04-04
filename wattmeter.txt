@@ -1,116 +1,58 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Dima Power Monitor</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@1.2.1/dist/chartjs-plugin-zoom.min.js"></script>
-    <style>
-        body { background: #1a1a1a; color: #00ff00; font-family: 'Segoe UI', sans-serif; text-align: center; }
-        .container { width: 90%; max-width: 900px; margin: 20px auto; background: #2d2d2d; padding: 20px; border-radius: 15px; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
-        button { background: #00ff00; color: #000; border: none; padding: 10px 25px; font-size: 18px; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        button:hover { background: #00cc00; }
-        #val { font-size: 64px; margin: 10px 0; }
-        .hint { color: #888; font-size: 14px; }
-    </style>
-</head>
-<body>
+#include <Wire.h> 
+#include <LiquidCrystal_I2C.h>
 
-    <h1>ENERGY MONITOR PRO</h1>
-    <button onclick="connectSerial()">CONNECT ARDUINO</button>
-    <div id="val">0.0 W</div>
-    <p class="hint">Управление: Ctrl + Колесо (Зум) | Зажать левую кнопку мыши (Скролл)</p>
+// Дисплей на адресе 0x27
+LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-    <div class="container">
-        <canvas id="myChart" height="400"></canvas>
-    </div>
+const int sensorPin = A0;
+const float VOLTAGE = 230.0; 
+// Коэффициент под 320 Ом (если врет, подправь только это число)
+const float CALIB = 3.12; 
 
-    <script>
-        let chart;
-        let buffer = "";
+void setup() {
+  Serial.begin(9600); // Это канал связи с сайтом
+  lcd.init();
+  lcd.backlight();
+  
+  lcd.setCursor(0, 0);
+  lcd.print("ENERGY MONITOR");
+  delay(1000);
+  lcd.clear();
+}
 
-        async function connectSerial() {
-            try {
-                const port = await navigator.serial.requestPort();
-                await port.open({ baudRate: 9600 });
-                const reader = port.readable.getReader();
-                
-                initChart();
+void loop() {
+  double sumSq = 0;
+  int samples = 1000;
 
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-                    buffer += new TextDecoder().decode(value);
-                    
-                    if (buffer.includes('\n')) {
-                        let lines = buffer.split('\n');
-                        let lastValidData = lines[lines.length - 2];
-                        buffer = lines[lines.length - 1];
+  // Читаем датчик и считаем True RMS
+  for (int i = 0; i < samples; i++) {
+    int raw = analogRead(sensorPin);
+    // 512.0 - это "ноль", который создают твои резисторы 1к+1к
+    float vRaw = (raw - 512.0) * (5.0 / 1024.0); 
+    sumSq += (double)vRaw * vRaw;
+    delayMicroseconds(100);
+  }
 
-                        let watts = parseFloat(lastValidData);
-                        if (!isNaN(watts)) {
-                            updateUI(watts);
-                        }
-                    }
-                }
-            } catch (e) {
-                alert("Ошибка: " + e.message);
-            }
-        }
+  double vRMS = sqrt(sumSq / samples);
+  double currentRMS = vRMS * CALIB; 
 
-        function initChart() {
-            const ctx = document.getElementById('myChart').getContext('2d');
-            chart = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Мощность (W)',
-                        data: [],
-                        borderColor: '#00ff00',
-                        backgroundColor: 'rgba(0, 255, 0, 0.1)',
-                        borderWidth: 2,
-                        tension: 0.3,
-                        pointRadius: 0
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        zoom: {
-                            pan: { enabled: true, mode: 'x', threshold: 5 },
-                            zoom: {
-                                wheel: { enabled: true, modifierKey: 'ctrl' },
-                                mode: 'x'
-                            }
-                        },
-                        legend: { display: false }
-                    },
-                    scales: {
-                        x: { grid: { color: '#444' }, ticks: { color: '#888' } },
-                        y: { grid: { color: '#444' }, ticks: { color: '#888' }, beginAtZero: true, suggestedMax: 500 }
-                    }
-                }
-            });
-        }
+  // Отсекаем шум (чтобы не прыгало 40Вт впустую)
+  if (currentRMS < 0.15) currentRMS = 0;
 
-        function updateUI(val) {
-            document.getElementById('val').innerText = val.toFixed(1) + " W";
-            const now = new Date().toLocaleTimeString();
-            
-            chart.data.labels.push(now);
-            chart.data.datasets[0].data.push(val);
+  double watts = currentRMS * VOLTAGE;
 
-            // Ограничиваем количество точек до 100, чтобы не тормозило
-            if (chart.data.labels.length > 100) {
-                chart.data.labels.shift();
-                chart.data.datasets[0].data.shift();
-            }
-            chart.update('none'); // Быстрое обновление без анимации
-        }
-    </script>
-</body>
-</html>
+  // 1. ВЫВОД НА ТВОЙ ДИСПЛЕЙ
+  lcd.setCursor(0, 0);
+  lcd.print("Power: ");
+  lcd.print(watts, 1);
+  lcd.print(" W     "); // Пробелы в конце стирают старые цифры
+  
+  lcd.setCursor(0, 1);
+  if(watts > 0) lcd.print("Status: ACTIVE  ");
+  else lcd.print("Status: IDLE    ");
 
-BE CAREFUL -- CODE NOT FINISHED
+  // 2. ОТПРАВКА НА САЙТ (ВАЖНО!)
+  Serial.println(watts); 
+  
+  delay(300); // Частота обновления (3 раза в секунду)
+}
