@@ -1,33 +1,22 @@
-#include <Wire.h> 
-#include <LiquidCrystal_I2C.h>
-
-// Дисплей на адресе 0x27
-LiquidCrystal_I2C lcd(0x27, 16, 2);
-
 const int sensorPin = A0;
 const float VOLTAGE = 230.0; 
-// Коэффициент под 320 Ом (если врет, подправь только это число)
-const float CALIB = 3.12; 
+
+// Коэффициент под твои резисторы (320 Ом)
+// Если 300Вт пила показывает мало, увеличь это число (например, до 13.0)
+const float CALIB = 12.2; 
 
 void setup() {
-  Serial.begin(9600); // Это канал связи с сайтом
-  lcd.init();
-  lcd.backlight();
-  
-  lcd.setCursor(0, 0);
-  lcd.print("ENERGY MONITOR");
-  delay(1000);
-  lcd.clear();
+  Serial.begin(9600);
+  // Нам больше не нужно инициализировать дисплей
 }
 
 void loop() {
   double sumSq = 0;
   int samples = 1000;
 
-  // Читаем датчик и считаем True RMS
   for (int i = 0; i < samples; i++) {
     int raw = analogRead(sensorPin);
-    // 512.0 - это "ноль", который создают твои резисторы 1к+1к
+    // 512 - это центр твоего делителя (1к + 1к)
     float vRaw = (raw - 512.0) * (5.0 / 1024.0); 
     sumSq += (double)vRaw * vRaw;
     delayMicroseconds(100);
@@ -35,24 +24,14 @@ void loop() {
 
   double vRMS = sqrt(sumSq / samples);
   double currentRMS = vRMS * CALIB; 
-
-  // Отсекаем шум (чтобы не прыгало 40Вт впустую)
-  if (currentRMS < 0.15) currentRMS = 0;
-
   double watts = currentRMS * VOLTAGE;
 
-  // 1. ВЫВОД НА ТВОЙ ДИСПЛЕЙ
-  lcd.setCursor(0, 0);
-  lcd.print("Power: ");
-  lcd.print(watts, 1);
-  lcd.print(" W     "); // Пробелы в конце стирают старые цифры
-  
-  lcd.setCursor(0, 1);
-  if(watts > 0) lcd.print("Status: ACTIVE  ");
-  else lcd.print("Status: IDLE    ");
+  // ЖЕСТКАЯ ОЧИСТКА МУСОРА
+  // Если на пустом проводе было 56, то отсечка на 60 сделает там честный 0
+  if (watts < 60.0) watts = 0; 
 
-  // 2. ОТПРАВКА НА САЙТ (ВАЖНО!)
-  Serial.println(watts); 
+  // Шлем только чистое число для графика
+  Serial.println(watts);
   
-  delay(300); // Частота обновления (3 раза в секунду)
+  delay(100); // Теперь обновляем график чаще (10 раз в секунду!)
 }
